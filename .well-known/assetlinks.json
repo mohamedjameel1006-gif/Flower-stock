@@ -1,1 +1,13 @@
 
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "Com.trz.stockbook",
+      "sha256_cert_fingerprints": [
+        "5C:D0:14:B2:4C:03:6B:03:92:57:2B:A0:95:8A:EB:FA:97:B6:87:03:60:A2:E9:B1:63:42:6B:22:E4:DC:EC:74"
+      ]
+    }
+  }
+]
