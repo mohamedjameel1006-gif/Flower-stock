@@ -26,19 +26,28 @@ header{position:sticky;top:0;z-index:5;background:var(--hdr);color:#fff;padding:
 #todayBtn{width:auto;padding:0 10px;font-size:13px}
 .status{display:flex;justify-content:space-between;font-size:12px;margin-top:6px;opacity:.9}
 #search{width:100%;margin-top:8px;border:0;border-radius:10px;padding:9px 12px;font-size:16px;background:#fff;color:#14213d}
-.thead,.row{display:grid;grid-template-columns:26px 1fr 70px 70px 54px;gap:6px;align-items:center;padding:8px 10px}
-.thead{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--mute);position:sticky;top:var(--hh,170px);background:var(--bg);z-index:4;border-bottom:1px solid var(--line)}
-.thead span:nth-child(n+3){text-align:center}
-.row{background:var(--card);border-bottom:1px solid var(--line)}
+.thead,.row{display:grid;grid-template-columns:1.2fr .9fr 1.2fr .9fr 1.1fr;gap:6px;align-items:center;padding:8px 10px}
+.thead{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--mute);position:sticky;top:var(--hh,170px);background:var(--bg);z-index:4;border-bottom:1px solid var(--line);text-align:center;line-height:1.2}
+.row{background:var(--card);border-bottom:1px solid var(--line);row-gap:5px}
 .row.done{background:var(--done)}
-.sn{font-size:12px;color:var(--mute)}
-.name{font-size:14px;line-height:1.25;word-break:break-word}
+.name{grid-column:1/-1;display:flex;align-items:baseline;gap:8px;font-size:14.5px;font-weight:600;line-height:1.25}
+.name .nm{flex:1;word-break:break-word}
+.name .emp{font-size:12px;font-weight:600;color:var(--pri);white-space:nowrap}
+.name .emp:empty{display:none}
+.sn{font-size:12px;color:var(--mute);font-weight:400;margin-right:4px}
+.cell input.mark{text-transform:uppercase;font-weight:600}
+.row.extra{background:color-mix(in srgb,var(--card) 92%,var(--pri));border-bottom-style:dashed}
+.row.extra.done{background:var(--done)}
+.name .sub{font-size:13px;font-weight:500;color:var(--mute)}
+.lbtn{border:1px solid var(--line);background:var(--card);color:var(--pri);border-radius:8px;padding:3px 9px;font-size:12.5px;font-weight:700;white-space:nowrap}
+.lbtn.rm{color:var(--bad);padding:3px 10px}
+.itot{display:flex;justify-content:space-between;align-items:center;padding:7px 12px;background:var(--tot);border-bottom:1px solid var(--line);font-size:13px;font-weight:600}
+.itot b{font-size:15px}
 .cell input{width:100%;font-size:16px;padding:7px 4px;border:1px solid var(--line);border-radius:8px;text-align:center;background:var(--bg);color:var(--ink);transition:border-color .3s}
 .cell input:focus{outline:none;border-color:var(--pri);box-shadow:0 0 0 2px color-mix(in srgb,var(--pri) 25%,transparent)}
 .cell input::placeholder{color:var(--mute);opacity:.55}
 .cell input.saved{border-color:var(--ok)}
 .cell input.bad{border-color:var(--bad)}
-.cell small{display:block;text-align:center;font-size:11px;color:var(--mute);min-height:14px;margin-top:2px;font-weight:600}
 .tot{font-weight:700;text-align:center;background:var(--tot);border-radius:8px;padding:8px 2px;font-size:15px}
 .empty{padding:40px 20px;text-align:center;color:var(--mute);line-height:1.6}
 .legend{padding:10px 12px;font-size:12px;color:var(--mute)}
@@ -88,9 +97,9 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0;width:100%}
   <input id="search" type="search" placeholder="Search item…" autocomplete="off">
 </header>
 
-<div class="thead"><span>#</span><span>Item</span><span>Old stock</span><span>New stock</span><span>Total</span></div>
+<div class="thead"><span>Old stock</span><span>Initial</span><span>New stock</span><span>Initial</span><span>Total qty</span></div>
 <main id="rows"></main>
-<div class="legend">Faded number in Old stock = yesterday's total. Initials under each number show who entered it.</div>
+<div class="legend">👤 = employee who entered the data. ＋ Line = add the same item again with a different mark. Initial = the mark on the product. Faded values in the Old stock boxes are yesterday's total and mark.</div>
 
 <div class="bottom">
   <span class="foot" id="foot"></span>
@@ -103,9 +112,9 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0;width:100%}
 <dialog id="nameDlg">
   <form method="dialog" class="dlg" id="nameForm">
     <h2>Who is using this phone?</h2>
-    <p class="mute">Your initials are saved next to every number you enter.</p>
+    <p class="mute">Saved with every entry, so you can see who updated the stock.</p>
     <label>Your name<input id="nmIn" required autocomplete="name"></label>
-    <label>Initials<input id="iniIn" required maxlength="4" style="text-transform:uppercase"></label>
+    <input id="iniIn" type="hidden">
     <div class="btns"><button class="btn pri" value="ok">Save</button></div>
   </form>
 </dialog>
@@ -178,6 +187,7 @@ function fbStore(url){
     watchItems(cb){db.ref('items').on('value',s=>cb(s.val()||{}),err)},
     watchSheet(d,cb){const r=db.ref('sheets/'+d);const h=r.on('value',s=>cb(s.val()||{}),err);return()=>r.off('value',h)},
     setCell(d,id,data){return db.ref('sheets/'+d+'/'+id).update(data)},
+    delCell(d,id){return db.ref('sheets/'+d+'/'+id).remove()},
     addItem(it){return db.ref('items').push().set(it)},
     updateItem(id,data){return db.ref('items/'+id).update(data)},
     delItem(id){return db.ref('items/'+id).remove()}
@@ -196,6 +206,7 @@ function localStore(){
     watchItems(cb){subs.items.push(cb);cb({...L.items})},
     watchSheet(d,cb){(subs.sheets[d]=subs.sheets[d]||[]).push(cb);cb({...(L.sheets[d]||{})});return()=>{subs.sheets[d]=subs.sheets[d].filter(f=>f!==cb)}},
     setCell(d,id,data){L.sheets[d]=L.sheets[d]||{};const c={...(L.sheets[d][id]||{}),...data};Object.keys(c).forEach(k=>c[k]==null&&delete c[k]);L.sheets[d][id]=c;save();fireS(d)},
+    delCell(d,id){if(L.sheets[d])delete L.sheets[d][id];save();fireS(d)},
     addItem(it){const id='i'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);L.items[id]=it;save();fireI()},
     updateItem(id,data){L.items[id]={...L.items[id],...data};save();fireI()},
     delItem(id){delete L.items[id];save();fireI()}
@@ -232,7 +243,8 @@ function setDate(d){
   if(!store)return;
   unSheet&&unSheet();unPrev&&unPrev();
   sheet={};prev={};
-  unSheet=store.watchSheet(d,v=>{sheet=v;patch()});
+  lineSig='';renderRows();
+  unSheet=store.watchSheet(d,v=>{sheet=v;sigOf()!==lineSig?renderRows():patch()});
   unPrev=store.watchSheet(shift(d,-1),v=>{prev=v;patch()});
 }
 $('#prevBtn').onclick=()=>setDate(shift(curDate,-1));
@@ -242,42 +254,83 @@ $('#dateIn').onchange=e=>e.target.value&&setDate(e.target.value);
 
 /* ---------- table ---------- */
 const sortedIds=()=>Object.keys(items).sort((a,b)=>(items[a].order||0)-(items[b].order||0)||String(items[a].name).localeCompare(String(items[b].name)));
+/* each item can have extra lines on a day (same product, different mark): keys "<itemId>~<n>" */
+const extraKeys=(obj,id)=>Object.keys(obj||{}).filter(k=>k.startsWith(id+'~')).sort();
+const linesOf=id=>[id,...extraKeys(sheet,id)];
+const sigOf=()=>Object.keys(sheet).filter(k=>k.includes('~')).sort().join('|');
+const itemTotal=id=>{let s=null;linesOf(id).forEach(k=>{const t=total(sheet[k]);if(t!=null)s=(s||0)+t});return s};
+let lineSig='';
 function renderRows(){
   const ids=sortedIds(),rows=$('#rows');
+  lineSig=sigOf();
   if(!ids.length){rows.innerHTML='<div class="empty">No items yet.<br>Tap <b>☰ Menu → Items list</b> to add your items.</div>';updFoot();return}
-  rows.innerHTML=ids.map((id,i)=>`<div class="row" data-id="${id}">
-    <span class="sn">${i+1}</span><span class="name">${esc(items[id].name)}</span>
-    <div class="cell"><input inputmode="decimal" enterkeyhint="next" data-f="old" aria-label="Old stock"><small></small></div>
-    <div class="cell"><input inputmode="decimal" enterkeyhint="next" data-f="new" aria-label="New stock"><small></small></div>
-    <span class="tot">–</span></div>`).join('');
+  const act=document.activeElement,keep=act&&act.dataset&&act.dataset.f&&act.closest('.row')?[act.closest('.row').dataset.key,act.dataset.f]:null;
+  const mk=f=>`<div class="cell"><input class="mark" maxlength="8" autocapitalize="characters" autocomplete="off" enterkeyhint="next" data-f="${f}" aria-label="Product mark"></div>`;
+  let h='';
+  ids.forEach((id,i)=>{
+    const ls=linesOf(id),nm=esc(items[id].name);
+    ls.forEach((k,j)=>{
+      const first=j===0;
+      h+=`<div class="row${first?'':' extra'}" data-id="${id}" data-key="${k}">
+    <div class="name"><span class="nm">${first?`<span class="sn">${i+1}.</span>${nm}`:`<span class="sub">↳ ${nm} · line ${j+1}</span>`}</span><span class="emp"></span>${first?'<button class="lbtn" data-a="add" aria-label="Add another line for this item">＋ Line</button>':'<button class="lbtn rm" data-a="rm" aria-label="Remove this line">✕</button>'}</div>
+    <div class="cell"><input inputmode="decimal" enterkeyhint="next" data-f="old" aria-label="Old stock"></div>${mk('oldMark')}
+    <div class="cell"><input inputmode="decimal" enterkeyhint="next" data-f="new" aria-label="New stock"></div>${mk('newMark')}
+    <span class="tot">–</span></div>`;
+    });
+    if(ls.length>1)h+=`<div class="itot" data-id="${id}"><span>${nm} — all lines</span><b>–</b></div>`;
+  });
+  rows.innerHTML=h;
   applySearch();patch();
+  if(keep){const r=rows.querySelector(`.row[data-key="${CSS.escape(keep[0])}"]`);const inp=r&&r.querySelector(`input[data-f="${keep[1]}"]`);inp&&inp.focus()}
 }
 function patch(){
+  const a=document.activeElement;
   document.querySelectorAll('#rows .row').forEach(r=>{
-    const id=r.dataset.id,c=sheet[id]||{},p=prev[id];
-    const [io,inw]=r.querySelectorAll('input'),[so,sn]=r.querySelectorAll('small');
-    if(document.activeElement!==io)io.value=fmt(c.old);
-    if(document.activeElement!==inw)inw.value=fmt(c.new);
+    const id=r.dataset.id,key=r.dataset.key,c=sheet[key]||{};
+    const j=linesOf(id).indexOf(key),pk=[id,...extraKeys(prev,id)][j],p=pk?prev[pk]:null;
+    const [io,iom,inw,inm]=r.querySelectorAll('input');
+    if(a!==io)io.value=fmt(c.old);
+    if(a!==iom)iom.value=c.oldMark||'';
+    if(a!==inw)inw.value=fmt(c.new);
+    if(a!==inm)inm.value=c.newMark||'';
     const pt=total(p);io.placeholder=pt==null?'':fmt(pt);
-    so.textContent=c.old!=null?(c.oldBy||''):'';
-    sn.textContent=c.new!=null?(c.newBy||''):'';
+    iom.placeholder=p?(p.newMark||p.oldMark||''):'';
+    r.querySelector('.emp').textContent=c.by?'👤 '+c.by:'';
     const t=total(c);r.querySelector('.tot').textContent=t==null?'–':fmt(t);
     r.classList.toggle('done',t!=null);
   });
+  document.querySelectorAll('#rows .itot').forEach(r=>{const t=itemTotal(r.dataset.id);r.querySelector('b').textContent=t==null?'–':fmt(t)});
   updFoot();
 }
-function updFoot(){const ids=Object.keys(items);const f=ids.filter(id=>total(sheet[id])!=null).length;$('#foot').textContent=ids.length?`${f} of ${ids.length} filled`:''}
-function applySearch(){const q=$('#search').value.trim().toLowerCase();document.querySelectorAll('#rows .row').forEach(r=>{r.hidden=!!q&&!String(items[r.dataset.id]?.name||'').toLowerCase().includes(q)})}
+function updFoot(){const ids=Object.keys(items);const f=ids.filter(id=>itemTotal(id)!=null).length;$('#foot').textContent=ids.length?`${f} of ${ids.length} filled`:''}
+function applySearch(){const q=$('#search').value.trim().toLowerCase();document.querySelectorAll('#rows [data-id]').forEach(r=>{r.hidden=!!q&&!String(items[r.dataset.id]?.name||'').toLowerCase().includes(q)})}
 $('#search').oninput=applySearch;
 
+$('#rows').addEventListener('click',e=>{
+  const b=e.target.closest('.lbtn');if(!b||!store)return;
+  if(!user)return openName();
+  const r=b.closest('.row'),id=r.dataset.id,key=r.dataset.key;
+  if(b.dataset.a==='add'){
+    const nk=id+'~'+Date.now().toString(36);
+    store.setCell(curDate,nk,{item:id,by:user.name,at:Date.now()});
+    setTimeout(()=>{const n=$(`#rows .row[data-key="${CSS.escape(nk)}"] input`);n&&n.focus()},150);
+  }else{
+    const c=sheet[key]||{};
+    if((c.old!=null||c.new!=null||c.oldMark||c.newMark)&&!confirm('Remove this line and its numbers?'))return;
+    store.delCell(curDate,key);
+  }
+});
 $('#rows').addEventListener('change',e=>{
-  const inp=e.target.closest('input');if(!inp||!store||!user)return;
-  const id=inp.closest('.row').dataset.id,f=inp.dataset.f,raw=inp.value,v=num(raw);
-  if(raw.trim()!==''&&v==null){inp.classList.add('bad');toast('Numbers only');return}
+  const inp=e.target.closest('input');if(!inp||!store)return;
+  if(!user)return openName();
+  const row=inp.closest('.row'),id=row.dataset.id,key=row.dataset.key,f=inp.dataset.f,raw=inp.value,isMark=f.endsWith('Mark');
+  let v;
+  if(isMark){v=raw.trim().toUpperCase()||null}
+  else{v=num(raw);if(raw.trim()!==''&&v==null){inp.classList.add('bad');toast('Numbers only');return}}
   inp.classList.remove('bad');
-  const old=(sheet[id]||{})[f];if((old??null)===v)return;
-  const data={[f]:v,[f+'By']:v==null?null:user.ini,[f+'At']:v==null?null:Date.now()};
-  try{const p=store.setCell(curDate,id,data);p&&p.catch&&p.catch(err=>toast('Not saved: '+err.message))}catch(err){toast('Not saved: '+err.message);return}
+  const old=(sheet[key]||{})[f];if((old??null)===v)return;
+  const data={[f]:v,[f+'By']:v==null?null:user.name,[f+'At']:v==null?null:Date.now(),by:user.name,at:Date.now(),item:id};
+  try{const p=store.setCell(curDate,key,data);p&&p.catch&&p.catch(err=>toast('Not saved: '+err.message))}catch(err){toast('Not saved: '+err.message);return}
   inp.classList.add('saved');setTimeout(()=>inp.classList.remove('saved'),900);
 });
 $('#rows').addEventListener('keydown',e=>{
@@ -288,17 +341,21 @@ $('#rows').addEventListener('keydown',e=>{
 });
 
 /* ---------- share / export ---------- */
+function lineText(c){return `Old ${fmt(c.old??0)}${c.oldMark?' ['+c.oldMark+']':''} + New ${fmt(c.new??0)}${c.newMark?' ['+c.newMark+']':''} = *${fmt(total(c))}*${c.by?' — '+c.by:''}`}
 function summary(){
   const L=[`*Stock — ${niceDate(curDate)}*`,''];let k=0;
-  sortedIds().forEach((id,i)=>{const c=sheet[id],t=total(c);if(t==null)return;k++;
-    L.push(`${i+1}. ${items[id].name}: Old ${fmt(c.old??0)}${c.oldBy?' ('+c.oldBy+')':''} + New ${fmt(c.new??0)}${c.newBy?' ('+c.newBy+')':''} = *${fmt(t)}*`)});
+  sortedIds().forEach((id,i)=>{
+    const ls=linesOf(id).filter(key=>total(sheet[key])!=null);if(!ls.length)return;k++;
+    if(ls.length===1)L.push(`${i+1}. ${items[id].name}: ${lineText(sheet[ls[0]])}`);
+    else{L.push(`${i+1}. ${items[id].name} — total *${fmt(itemTotal(id))}*`);ls.forEach(key=>L.push(`   • ${lineText(sheet[key])}`))}
+  });
   if(!k)L.push('(no entries yet)');
   L.push('',`— ${user?user.name:''}`);return L.join('\n');
 }
 $('#shareBtn').onclick=()=>{const text=summary();if(navigator.share)navigator.share({text}).catch(()=>{});else window.open('https://wa.me/?text='+encodeURIComponent(text),'_blank')};
 $('#csvBtn').onclick=()=>{
-  const R=[['Date','S.No','Item','Old Stock','Initial','New Stock','Initial','Total Qty']];
-  sortedIds().forEach((id,i)=>{const c=sheet[id]||{};R.push([curDate,i+1,items[id].name,fmt(c.old),c.old!=null?c.oldBy||'':'',fmt(c.new),c.new!=null?c.newBy||'':'',fmt(total(c))])});
+  const R=[['Date','Employee','S.No','Item','Old Stock','Initial','New Stock','Initial','Total Qty']];
+  sortedIds().forEach((id,i)=>linesOf(id).forEach(key=>{const c=sheet[key]||{};R.push([curDate,c.by||'',i+1,items[id].name,fmt(c.old),c.oldMark||'',fmt(c.new),c.newMark||'',fmt(total(c))])}));
   const csv=R.map(r=>r.map(x=>{x=String(x??'');return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x}).join(',')).join('\r\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv'}));a.download=`stock-${curDate}.csv`;document.body.appendChild(a);a.click();a.remove();
 };
@@ -311,9 +368,10 @@ $('#iniIn').oninput=()=>iniTouched=true;
 $('#nameDlg').addEventListener('cancel',e=>{if(!user)e.preventDefault()});
 $('#nameDlg').addEventListener('close',()=>{
   if($('#nameDlg').returnValue!=='ok')return;
-  user={name:$('#nmIn').value.trim(),ini:$('#iniIn').value.trim().toUpperCase()};LS.set('user',user);showWho();
+  const nm=$('#nmIn').value.trim();if(!nm)return;
+  user={name:nm,ini:nm.split(/\s+/).map(w=>w[0]||'').join('').slice(0,3).toUpperCase()};LS.set('user',user);showWho();
 });
-function showWho(){$('#who').textContent=user?`👤 ${user.name} (${user.ini})`:''}
+function showWho(){$('#who').textContent=user?`👤 ${user.name}`:''}
 
 /* ---------- menu ---------- */
 $('#menuBtn').onclick=()=>$('#menuDlg').showModal();
