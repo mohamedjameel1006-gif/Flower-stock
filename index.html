@@ -168,6 +168,7 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0;width:100%}
   <div class="dlg menu">
     <h2>Menu</h2>
     <button class="btn" id="mItems">📦 Items list (add / edit / order)</button>
+    <button class="btn" id="mNotify">🔔 Notifications</button>
     <button class="btn" id="mSetup">🔗 Database &amp; staff link</button>
     <button class="btn" id="mName">👤 Change my name</button>
     <button class="btn" id="mClose">Close</button>
@@ -183,6 +184,19 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0;width:100%}
     <div class="btns"><button class="btn pri" id="addItems">Add</button></div>
     <div id="itemList" class="ilist"></div>
     <div class="btns"><button class="btn" id="itemsClose">Done</button></div>
+  </div>
+</dialog>
+
+<dialog id="notifyDlg">
+  <div class="dlg">
+    <h2>🔔 Notifications</h2>
+    <p class="mute">Get a phone notification whenever anyone adds, changes or deletes stock, even when the app is closed.</p>
+    <p class="mute"><b>1.</b> Install the free <b>ntfy</b> app from the Play Store.<br><b>2.</b> Tap <b>Turn on</b> below, then <b>Copy name</b>.<br><b>3.</b> In ntfy tap <b>＋</b>, paste the name, tap Subscribe.<br><b>4.</b> Tap <b>Send test</b> here to check it works.</p>
+    <label>Notification name (keep it secret)<input id="ntTopic" autocapitalize="off" spellcheck="false"></label>
+    <div class="btns"><button class="btn pri" id="ntOn">Turn on</button><button class="btn" id="ntCopy">Copy name</button></div>
+    <div class="btns"><button class="btn" id="ntTest">Send test</button><button class="btn danger" id="ntOff">Turn off</button></div>
+    <p class="mute" id="ntState"></p>
+    <div class="btns"><button class="btn" id="ntClose">Close</button></div>
   </div>
 </dialog>
 
@@ -217,7 +231,7 @@ let toastT;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add
 let user=LS.get('user',null), dbUrl=LS.get('dbUrl','');
 const inv=location.hash.match(/db=([^&]+)/);
 if(inv){dbUrl=decodeURIComponent(inv[1]);LS.set('dbUrl',dbUrl);history.replaceState(null,'',location.pathname+location.search);setTimeout(()=>toast('Connected to shop stock ✓'),800)}
-let store=null, items={}, entries={}, view='stock', editId=null, filter=LS.get('filter','stock'), pendingSel=null;
+let notifyCfg={}, store=null, items={}, entries={}, view='stock', editId=null, filter=LS.get('filter','stock'), pendingSel=null;
 
 /* old date-wise data -> current stock entries (runs once) */
 function convertDay(day){
@@ -235,6 +249,8 @@ function fbStore(url){
     watchConn(cb){db.ref('.info/connected').on('value',s=>cb(!!s.val()))},
     watchItems(cb){db.ref('items').on('value',s=>cb(s.val()||{}),err)},
     watchEntries(cb){db.ref('stock').on('value',s=>cb(s.val()||{}),err)},
+    watchNotify(cb){db.ref('meta/notify').on('value',s=>cb(s.val()||{}))},
+    setNotify(v){return db.ref('meta/notify').set(v)},
     addEntry(e){return db.ref('stock').push().set(e)},
     updateEntry(id,d){return db.ref('stock/'+id).update(d)},
     delEntry(id){return db.ref('stock/'+id).remove()},
@@ -265,6 +281,8 @@ function localStore(){
     watchConn(cb){cb(false)},
     watchItems(cb){subs.items.push(cb);cb({...L.items})},
     watchEntries(cb){subs.stock.push(cb);cb({...L.stock})},
+    watchNotify(cb){subs.nt=cb;cb(LS.get('l_notify',{}))},
+    setNotify(v){LS.set('l_notify',v);subs.nt&&subs.nt(v||{})},
     addEntry(e){L.stock[nid()]=clean({...e});save();fS()},
     updateEntry(id,d){L.stock[id]=clean({...L.stock[id],...d});save();fS()},
     delEntry(id){delete L.stock[id];save();fS()},
@@ -301,6 +319,7 @@ async function start(){
   store.watchConn(c=>setConn(store.shared?(c?'on':'off'):'local'));
   store.watchItems(v=>{items=v;renderAll();if($('#itemsDlg').open)renderItemList()});
   store.watchEntries(v=>{entries=v;renderStock();renderRecent()});
+  store.watchNotify(v=>{notifyCfg=v||{};if($('#notifyDlg').open)showNt()});
   store.migrate();
 }
 
@@ -310,6 +329,13 @@ const entriesOf=id=>Object.keys(entries).filter(k=>entries[k].item===id).sort((a
 const itemQty=id=>{let s=null;entriesOf(id).forEach(k=>{const t=tot(entries[k]);if(t!=null)s=(s||0)+t});return s};
 const iname=id=>items[id]?items[id].name:'(deleted item)';
 function renderAll(){renderStock();renderOptions();renderRecent()}
+
+/* ---------- push notifications (ntfy.sh) ---------- */
+function notify(title,message,tag){
+  if(!notifyCfg.topic)return;
+  fetch('https://ntfy.sh/',{method:'POST',body:JSON.stringify({topic:notifyCfg.topic,title,message,tags:[tag||'package']})}).catch(()=>{});
+}
+const brief=e=>`Old ${fmt(e.old)||0}${e.oldMark?' ['+e.oldMark+']':''} + New ${fmt(e.new)||0}${e.newMark?' ['+e.newMark+']':''} = ${fmt(tot(e))}`;
 
 /* ---------- STOCK SCREEN ---------- */
 function renderStock(){
@@ -372,17 +398,21 @@ $('#eForm').onsubmit=ev=>{
   if((o.trim()&&ov==null)||(n.trim()&&nv==null))return toast('Stock must be a number');
   if(ov==null&&nv==null)return toast('Enter old stock or new stock');
   const d={item,old:ov,oldMark:markVal('#eOldMark'),new:nv,newMark:markVal('#eNewMark'),by:user.name,at:Date.now()};
-  const wasEdit=!!editId;
+  const wasEdit=!!editId,before=wasEdit?{...entries[editId]}:null;
+  let itemTot=(itemQty(item)||0)+tot(d);if(wasEdit&&before.item===item)itemTot-=tot(before)||0;
   if(!wasEdit)d.c=d.at;
   try{const p=wasEdit?store.updateEntry(editId,d):store.addEntry(d);p&&p.catch&&p.catch(err=>toast('Not saved: '+err.message))}
   catch(err){return toast('Not saved: '+err.message)}
   toast(`${wasEdit?'Updated':'Saved'} ✓ ${iname(item)} = ${fmt(tot(d))}`);
+  if(wasEdit)notify(`✏️ ${user.name} changed ${iname(item)}`,`Was: ${before.item!==item?iname(before.item)+' ':''}${brief(before)}\nNow: ${brief(d)}\n${iname(item)} total: ${fmt(itemTot)}`,'pencil2');
+  else notify(`➕ ${user.name} added ${iname(item)}`,`${brief(d)}\n${iname(item)} total: ${fmt(itemTot)}`,'package');
   resetForm();
   if(wasEdit)showView('stock');else $('#eItem').focus();
 };
 $('#eDel').onclick=()=>{
   if(!editId||!confirm('Delete this entry?'))return;
-  store.delEntry(editId);toast('Entry deleted');resetForm();showView('stock');
+  const old=entries[editId];store.delEntry(editId);toast('Entry deleted');
+  if(old)notify(`🗑 ${user?user.name:'Someone'} deleted ${iname(old.item)} entry`,`${brief(old)}\n${iname(old.item)} total now: ${fmt((itemQty(old.item)||0)-(tot(old)||0))}`,'wastebasket');resetForm();showView('stock');
 };
 $('#eCancel').onclick=()=>{resetForm();showView('stock')};
 $('#eNewItem').onclick=()=>{
@@ -478,6 +508,24 @@ $('#itemList').onclick=e=>{
     if(confirm(`Delete "${items[id].name}"${es.length?` and its ${es.length} stock entr${es.length>1?'ies':'y'}`:''}?\nThis removes it for everyone.`)){es.forEach(k=>store.delEntry(k));store.delItem(id)}}
 };
 $('#itemsClose').onclick=()=>$('#itemsDlg').close();
+
+/* ---------- notifications dialog ---------- */
+const newTopic=()=>'trz-stock-'+Math.random().toString(36).slice(2,8)+Math.random().toString(36).slice(2,6);
+function showNt(){
+  $('#ntTopic').value=notifyCfg.topic||$('#ntTopic').value||newTopic();
+  $('#ntState').textContent=notifyCfg.topic?'✅ On – every phone sends updates to this name.':'Off';
+  $('#ntTest').disabled=$('#ntOff').disabled=!notifyCfg.topic;
+}
+$('#mNotify').onclick=()=>{$('#menuDlg').close();if(!store)return toast('Connect the database first');$('#ntTopic').value='';showNt();$('#notifyDlg').showModal()};
+$('#ntOn').onclick=()=>{
+  const t=$('#ntTopic').value.trim();
+  if(!/^[A-Za-z0-9_-]{8,64}$/.test(t))return toast('Use 8+ letters, numbers, - or _ only');
+  store.setNotify({topic:t});notifyCfg={topic:t};showNt();toast('Notifications on');
+};
+$('#ntOff').onclick=()=>{if(confirm('Turn off notifications for everyone?')){store.setNotify(null);notifyCfg={};showNt()}};
+$('#ntCopy').onclick=()=>{const t=$('#ntTopic').value.trim();navigator.clipboard?.writeText(t).then(()=>toast('Name copied – paste it in ntfy'),()=>prompt('Copy this name',t))};
+$('#ntTest').onclick=()=>{notify('✅ Stock Book test','Notifications are working.','white_check_mark');toast('Test sent')};
+$('#ntClose').onclick=()=>$('#notifyDlg').close();
 
 /* ---------- setup ---------- */
 const inviteLink=()=>location.origin+location.pathname+'#db='+encodeURIComponent(dbUrl);
