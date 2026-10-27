@@ -190,12 +190,17 @@ hr{border:0;border-top:1px solid var(--line);margin:4px 0;width:100%}
 <dialog id="notifyDlg">
   <div class="dlg">
     <h2>🔔 Notifications</h2>
-    <p class="mute">Get a phone notification whenever anyone adds, changes or deletes stock, even when the app is closed.</p>
-    <p class="mute"><b>1.</b> Install the free <b>ntfy</b> app from the Play Store.<br><b>2.</b> Tap <b>Turn on</b> below, then <b>Copy name</b>.<br><b>3.</b> In ntfy tap <b>＋</b>, paste the name, tap Subscribe.<br><b>4.</b> Tap <b>Send test</b> here to check it works.</p>
-    <label>Notification name (keep it secret)<input id="ntTopic" autocapitalize="off" spellcheck="false"></label>
-    <div class="btns"><button class="btn pri" id="ntOn">Turn on</button><button class="btn" id="ntCopy">Copy name</button></div>
-    <div class="btns"><button class="btn" id="ntTest">Send test</button><button class="btn danger" id="ntOff">Turn off</button></div>
+    <p class="mute">Get a Stock Book notification whenever anyone adds, changes or deletes stock.</p>
+    <h3>1. Notification sender (set once)</h3>
+    <p class="mute">Paste your Cloudflare worker link. Every phone uses it automatically.</p>
+    <input id="ntWorker" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://stock-notify.xxxx.workers.dev">
+    <div class="btns"><button class="btn" id="ntSave">Save link</button></div>
+    <hr>
+    <h3>2. This phone</h3>
     <p class="mute" id="ntState"></p>
+    <div class="btns"><button class="btn pri" id="ntOn">Turn on for this phone</button></div>
+    <div class="btns"><button class="btn" id="ntTest">Send test</button><button class="btn danger" id="ntOff">Turn off</button></div>
+    <p class="mute">Changes made on a phone don't notify that same phone.</p>
     <div class="btns"><button class="btn" id="ntClose">Close</button></div>
   </div>
 </dialog>
@@ -251,6 +256,9 @@ function fbStore(url){
     watchEntries(cb){db.ref('stock').on('value',s=>cb(s.val()||{}),err)},
     watchNotify(cb){db.ref('meta/notify').on('value',s=>cb(s.val()||{}))},
     setNotify(v){return db.ref('meta/notify').set(v)},
+    setLast(v){return db.ref('meta/lastChange').set(v)},
+    setPush(id,v){return db.ref('push/'+id).set(v)},
+    delPush(id){return db.ref('push/'+id).remove()},
     addEntry(e){return db.ref('stock').push().set(e)},
     updateEntry(id,d){return db.ref('stock/'+id).update(d)},
     delEntry(id){return db.ref('stock/'+id).remove()},
@@ -283,6 +291,7 @@ function localStore(){
     watchEntries(cb){subs.stock.push(cb);cb({...L.stock})},
     watchNotify(cb){subs.nt=cb;cb(LS.get('l_notify',{}))},
     setNotify(v){LS.set('l_notify',v);subs.nt&&subs.nt(v||{})},
+    setLast(){return Promise.resolve()},setPush(){return Promise.resolve()},delPush(){return Promise.resolve()},
     addEntry(e){L.stock[nid()]=clean({...e});save();fS()},
     updateEntry(id,d){L.stock[id]=clean({...L.stock[id],...d});save();fS()},
     delEntry(id){delete L.stock[id];save();fS()},
@@ -320,6 +329,7 @@ async function start(){
   store.watchItems(v=>{items=v;renderAll();if($('#itemsDlg').open)renderItemList()});
   store.watchEntries(v=>{entries=v;renderStock();renderRecent()});
   store.watchNotify(v=>{notifyCfg=v||{};if($('#notifyDlg').open)showNt()});
+  if(dbUrl&&'caches' in window)caches.open('stockbook-cfg').then(c=>c.put('cfg',new Response(JSON.stringify({db:dbUrl})))).catch(()=>{});
   store.migrate();
 }
 
@@ -330,10 +340,11 @@ const itemQty=id=>{let s=null;entriesOf(id).forEach(k=>{const t=tot(entries[k]);
 const iname=id=>items[id]?items[id].name:'(deleted item)';
 function renderAll(){renderStock();renderOptions();renderRecent()}
 
-/* ---------- push notifications (ntfy.sh) ---------- */
-function notify(title,message,tag){
-  if(!notifyCfg.topic)return;
-  fetch('https://ntfy.sh/',{method:'POST',body:JSON.stringify({topic:notifyCfg.topic,title,message,tags:[tag||'package']})}).catch(()=>{});
+/* ---------- push notifications ---------- */
+const VAPID_PUB='BANEvvQER9SxZbvtUMxGkQEPU1dFBEltyW5luxXseHR9J-RBbFseHYo_TIA8M1Y2ev2KcvffSSvZ5AJS-hq1HyY';
+function notify(title,body,from){
+  if(!store||!store.shared||!notifyCfg.worker)return;
+  store.setLast({title,body,at:Date.now()}).then(()=>fetch(notifyCfg.worker,{method:'POST',body:JSON.stringify({db:dbUrl,from:from===undefined?LS.get('pushId',''):from})})).catch(()=>{});
 }
 const brief=e=>`Old ${fmt(e.old)||0}${e.oldMark?' ['+e.oldMark+']':''} + New ${fmt(e.new)||0}${e.newMark?' ['+e.newMark+']':''} = ${fmt(tot(e))}`;
 
@@ -404,15 +415,15 @@ $('#eForm').onsubmit=ev=>{
   try{const p=wasEdit?store.updateEntry(editId,d):store.addEntry(d);p&&p.catch&&p.catch(err=>toast('Not saved: '+err.message))}
   catch(err){return toast('Not saved: '+err.message)}
   toast(`${wasEdit?'Updated':'Saved'} ✓ ${iname(item)} = ${fmt(tot(d))}`);
-  if(wasEdit)notify(`✏️ ${user.name} changed ${iname(item)}`,`Was: ${before.item!==item?iname(before.item)+' ':''}${brief(before)}\nNow: ${brief(d)}\n${iname(item)} total: ${fmt(itemTot)}`,'pencil2');
-  else notify(`➕ ${user.name} added ${iname(item)}`,`${brief(d)}\n${iname(item)} total: ${fmt(itemTot)}`,'package');
+  if(wasEdit)notify(`✏️ ${user.name} changed ${iname(item)}`,`Was: ${before.item!==item?iname(before.item)+' ':''}${brief(before)}\nNow: ${brief(d)}\n${iname(item)} total: ${fmt(itemTot)}`);
+  else notify(`➕ ${user.name} added ${iname(item)}`,`${brief(d)}\n${iname(item)} total: ${fmt(itemTot)}`);
   resetForm();
   if(wasEdit)showView('stock');else $('#eItem').focus();
 };
 $('#eDel').onclick=()=>{
   if(!editId||!confirm('Delete this entry?'))return;
   const old=entries[editId];store.delEntry(editId);toast('Entry deleted');
-  if(old)notify(`🗑 ${user?user.name:'Someone'} deleted ${iname(old.item)} entry`,`${brief(old)}\n${iname(old.item)} total now: ${fmt((itemQty(old.item)||0)-(tot(old)||0))}`,'wastebasket');resetForm();showView('stock');
+  if(old)notify(`🗑 ${user?user.name:'Someone'} deleted ${iname(old.item)} entry`,`${brief(old)}\n${iname(old.item)} total now: ${fmt((itemQty(old.item)||0)-(tot(old)||0))}`);resetForm();showView('stock');
 };
 $('#eCancel').onclick=()=>{resetForm();showView('stock')};
 $('#eNewItem').onclick=()=>{
@@ -510,21 +521,42 @@ $('#itemList').onclick=e=>{
 $('#itemsClose').onclick=()=>$('#itemsDlg').close();
 
 /* ---------- notifications dialog ---------- */
-const newTopic=()=>'trz-stock-'+Math.random().toString(36).slice(2,8)+Math.random().toString(36).slice(2,6);
-function showNt(){
-  $('#ntTopic').value=notifyCfg.topic||$('#ntTopic').value||newTopic();
-  $('#ntState').textContent=notifyCfg.topic?'✅ On – every phone sends updates to this name.':'Off';
-  $('#ntTest').disabled=$('#ntOff').disabled=!notifyCfg.topic;
+const pushOK=()=>'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
+const u8=b=>{const s=atob(b.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-b.length%4)%4));return Uint8Array.from(s,c=>c.charCodeAt(0))};
+async function phoneOn(){try{if(!pushOK()||Notification.permission!=='granted'||!LS.get('pushId',''))return false;const r=await navigator.serviceWorker.ready;return !!(await r.pushManager.getSubscription())}catch(e){return false}}
+async function showNt(){
+  $('#ntWorker').value=notifyCfg.worker||$('#ntWorker').value||'';
+  const on=await phoneOn();
+  $('#ntState').textContent=!pushOK()?'This phone does not support notifications.':!notifyCfg.worker?'Save the sender link first (step 1).':on?'✅ ON – this phone gets notifications.':'Off for this phone.';
+  $('#ntOn').disabled=!notifyCfg.worker||on||!pushOK();
+  $('#ntOff').disabled=$('#ntTest').disabled=!on;
 }
-$('#mNotify').onclick=()=>{$('#menuDlg').close();if(!store)return toast('Connect the database first');$('#ntTopic').value='';showNt();$('#notifyDlg').showModal()};
-$('#ntOn').onclick=()=>{
-  const t=$('#ntTopic').value.trim();
-  if(!/^[A-Za-z0-9_-]{8,64}$/.test(t))return toast('Use 8+ letters, numbers, - or _ only');
-  store.setNotify({topic:t});notifyCfg={topic:t};showNt();toast('Notifications on');
+$('#mNotify').onclick=()=>{$('#menuDlg').close();if(!store||!store.shared)return toast('Connect the shared database first');$('#ntWorker').value='';showNt();$('#notifyDlg').showModal()};
+$('#ntSave').onclick=()=>{
+  const w=$('#ntWorker').value.trim().replace(/\/+$/,'');
+  if(!/^https:\/\/[^\s\/]+\.workers\.dev$/.test(w))return toast('Paste the link that ends with .workers.dev');
+  store.setNotify({worker:w});notifyCfg={worker:w};showNt();toast('Sender saved');
 };
-$('#ntOff').onclick=()=>{if(confirm('Turn off notifications for everyone?')){store.setNotify(null);notifyCfg={};showNt()}};
-$('#ntCopy').onclick=()=>{const t=$('#ntTopic').value.trim();navigator.clipboard?.writeText(t).then(()=>toast('Name copied – paste it in ntfy'),()=>prompt('Copy this name',t))};
-$('#ntTest').onclick=()=>{notify('✅ Stock Book test','Notifications are working.','white_check_mark');toast('Test sent')};
+$('#ntOn').onclick=async()=>{
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted')return toast('Notifications are blocked – allow them in phone Settings → Apps → Stock Book');
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:u8(VAPID_PUB)});
+    let id=LS.get('pushId','');if(!id){id='p'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);LS.set('pushId',id)}
+    await store.setPush(id,{sub:sub.toJSON(),name:user?user.name:'',at:Date.now()});
+    await caches.open('stockbook-cfg').then(c=>c.put('cfg',new Response(JSON.stringify({db:dbUrl}))));
+    toast('Notifications on for this phone');
+  }catch(e){console.error(e);toast('Could not turn on: '+e.message)}
+  showNt();
+};
+$('#ntOff').onclick=async()=>{
+  try{const reg=await navigator.serviceWorker.ready;const sub=await reg.pushManager.getSubscription();sub&&await sub.unsubscribe()}catch(e){}
+  const id=LS.get('pushId','');if(id)await store.delPush(id);
+  toast('Notifications off for this phone');showNt();
+};
+$('#ntTest').onclick=()=>{notify('✅ Stock Book test','Notifications are working.','');toast('Test sent – it should arrive in a few seconds')};
 $('#ntClose').onclick=()=>$('#notifyDlg').close();
 
 /* ---------- setup ---------- */
